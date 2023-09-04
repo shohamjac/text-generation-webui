@@ -18,12 +18,15 @@ from modules.text_generation import (
     generate_reply,
 )
 
+from modules.logging_colors import logger
+
 from transformers import AutoTokenizer
 from petals import AutoDistributedModelForCausalLM
+from huggingface_hub import login
 
 params = {
-    "display_name": "Example Extension",
-    "is_tab": False,
+    "display_name": "Petals",
+    "is_tab": True,
 }
 
 class MyLogits(LogitsProcessor):
@@ -112,11 +115,9 @@ def custom_generate_chat_prompt(user_input, state, **kwargs):
     result = chat.generate_chat_prompt(user_input, state, **kwargs)
     return result
 
-def custom_css():
-    """
-    Returns a CSS string that gets appended to the CSS for the webui.
-    """
-    return ''
+# def custom_css():
+#     path_to_css = Path(__file__).parent.resolve() / 'style.css'
+#     return open(path_to_css, 'r').read()
 
 def custom_js():
     """
@@ -139,17 +140,39 @@ def ui():
     To learn about gradio components, check out the docs:
     https://gradio.app/docs/
     """
-    with gr.Accordion("Petals", open=True):
-        with gr.Row():
-            shared.gradio['petal_load'] = gr.Button("petals", elem_classes='refresh-button')
-    shared.gradio['petal_load'].click(load_petal_model, None, None)
+    # with gr.Accordion("Petals", open=True):
+    with gr.Row():
+        with gr.Column():
+            shared.gradio['petals_model_menu'] = gr.Textbox(label="choose model",
+                                                            info="Enter the model you would like to run. Models health"
+                                                                 " can be found [here](https://health.petals.dev/)",
+                                                            value="petals-team/StableBeluga2")
+            shared.gradio['petals_hf_token'] = gr.Textbox(label="Hugging face Token",
+                                                          placeholder="If you want to use Llama 2, insert token here,"
+                                                                      " else leave blank")
+            with gr.Row():
+                shared.gradio['petals_status'] = gr.Markdown('ready')
+                with gr.Column():
+                    shared.gradio['petals_load'] = gr.Button("Load petal model")
+    shared.gradio['petals_load'].click(load_petal_model,
+                                      inputs=[shared.gradio['petals_model_menu'], shared.gradio['petals_hf_token']],
+                                      outputs=shared.gradio['petals_status'])
 
+def load_petal_model(model_name, token):
+    shared.model_name = "petals: " + model_name
 
-def load_petal_model():
-    shared.model_name = "petals"
-    model_name = "petals-team/StableBeluga2"
+    print(f"{token=}")
 
-    # shared.model, shared.tokenizer = load_model(shared.model_name, loader)
+    if token != '':
+        logger.info('logging in to Hugging Face')
+        print(token)
+        try:
+            login(token=token)
+        except(ValueError):
+            raise gr.Error("Login failed. Make sure you have the right token")
+
+    logger.info("Loading Petals model \'"+ model_name + "\'")
     shared.tokenizer = AutoTokenizer.from_pretrained(model_name, torch_dtype=torch.float32)
     shared.model = AutoDistributedModelForCausalLM.from_pretrained(model_name)
     shared.model = shared.model.cuda()
+    yield "Model was loaded successfully"
